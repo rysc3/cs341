@@ -1,0 +1,196 @@
+#include "cachelab.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <getopt.h>
+
+
+typedef struct
+{
+  int valid;
+  unsigned long long tag;
+  int last_used;
+} line;
+
+typedef struct
+{
+  line *lines;
+} set;
+
+typedef struct
+{
+  set *sets;
+  int s, E, b;
+  int hit_count, miss_count, eviction_count;
+  int time;
+} cache;
+
+
+cache init_cache(int s, int E, int b);
+void run(cache *c, const char *trace_file);
+void free_cache(cache *c);
+
+
+cache init_cache(int s, int E, int b)
+{
+  cache c;
+  c.s = s;
+  c.E = E;
+  c.b = b;
+  c.hit_count = 0;
+  c.miss_count = 0;
+  c.eviction_count = 0;
+  c.time = 0;
+
+  int num_sets = 1 << s;
+  c.sets = (set *)malloc(num_sets * sizeof(set));
+
+  for (int i = 0; i < num_sets; i++)
+  {
+    c.sets[i].lines = (line *)malloc(E * sizeof(line));
+    for (int j = 0; j < E; j++)
+    {
+      c.sets[i].lines[j].valid = 0;
+      c.sets[i].lines[j].tag = 0;
+      c.sets[i].lines[j].last_used = 0;
+    }
+  }
+  return c;
+}
+
+/*
+  Main simulation function.
+*/
+void run(cache *c, const char *trace_file)
+{
+  FILE *file = fopen(trace_file, "r");
+  if (!file)
+  {
+    perror("Failed to open trace file");
+    exit(EXIT_FAILURE);
+  }
+
+  char operation;
+  unsigned long long address;
+  int size;
+
+  while (fscanf(file, " %c %llx,%d", &operation, &address, &size) == 3)
+  {
+    if (operation == 'I') // Ignore instruction loads
+      continue;
+
+    c->time++; // Increment global time for LRU tracking
+
+    // Calculate set index and tag
+    unsigned long long set_index = (address >> c->b) & ((1 << c->s) - 1);
+    unsigned long long tag = address >> (c->s + c->b);
+
+    set *cache_set = &c->sets[set_index];
+    int hit = 0, empty_line_index = -1, lru_index = 0;
+    int lru_time = cache_set->lines[0].last_used;
+
+    // Check for hit or find empty/LRU line
+    for (int i = 0; i < c->E; i++)
+    {
+      if (cache_set->lines[i].valid && cache_set->lines[i].tag == tag)
+      {
+        hit = 1;
+        cache_set->lines[i].last_used = c->time;
+        break;
+      }
+      if (!cache_set->lines[i].valid && empty_line_index == -1)
+        empty_line_index = i;
+      if (cache_set->lines[i].last_used < lru_time)
+      {
+        lru_time = cache_set->lines[i].last_used;
+        lru_index = i;
+      }
+    }
+
+    if (hit)
+    {
+      c->hit_count++;
+    }
+    else
+    {
+      c->miss_count++;
+      if (empty_line_index != -1)
+      {
+        // Use the empty line
+        cache_set->lines[empty_line_index].valid = 1;
+        cache_set->lines[empty_line_index].tag = tag;
+        cache_set->lines[empty_line_index].last_used = c->time;
+      }
+      else
+      {
+        // Evict the least recently used line
+        c->eviction_count++;
+        cache_set->lines[lru_index].tag = tag;
+        cache_set->lines[lru_index].last_used = c->time;
+      }
+    }
+
+    // Handle "M" (modify) operation: always results in an extra hit
+    if (operation == 'M')
+      c->hit_count++;
+  }
+
+  fclose(file);
+}
+
+
+void free_cache(cache *c)
+{
+  int num_sets = 1 << c->s;
+  for (int i = 0; i < num_sets; i++)
+  {
+    free(c->sets[i].lines);
+  }
+  free(c->sets);
+}
+
+// Main function
+int main(int argc, char **argv)
+{
+  int s = 0, E = 0, b = 0;
+  char *trace_file = NULL;
+
+  // Read in args
+  int opt;
+  while ((opt = getopt(argc, argv, "s:E:b:t:")) != -1)
+  {
+    switch (opt)
+    {
+    case 's':
+      s = atoi(optarg);
+      break;
+    case 'E':
+      E = atoi(optarg);
+      break;
+    case 'b':
+      b = atoi(optarg);
+      break;
+    case 't':
+      trace_file = optarg;
+      break;
+    default:
+      fprintf(stderr, "Usage: %s -s <s> -E <E> -b <b> -t <tracefile>\n", argv[0]);
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  if (!trace_file)
+  {
+    fprintf(stderr, "Trace file must be specified with -t\n");
+    exit(EXIT_FAILURE);
+  }
+
+  cache c = init_cache(s, E, b);
+
+  run(&c, trace_file);
+
+  printSummary(c.hit_count, c.miss_count, c.eviction_count);
+  free_cache(&c);
+
+  return 0;
+}
