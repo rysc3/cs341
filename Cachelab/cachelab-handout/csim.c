@@ -58,15 +58,8 @@ int main(int argc, char **argv)
       trace_file = optarg;
       break;
     default:
-      fprintf(stderr, "Usage: %s -s <s> -E <E> -b <b> -t <tracefile>\n", argv[0]);
       exit(EXIT_FAILURE);
     }
-  }
-
-  if (!trace_file)
-  {
-    fprintf(stderr, "Error: Trace file not specified with -t\n");
-    exit(EXIT_FAILURE);
   }
 
   cache c = init(s, E, b);
@@ -127,14 +120,26 @@ void run(cache *c, const char *trace_file)
   while (fscanf(file, " %c %lx,%d", &operation, &address, &size) == 3)
   {
     // Ignore load instructions
-    if (operation == 'I')
-      continue;
-
+    if (operation == 'I'){ continue; }
+    // M is always a hit
+    if (operation == 'M'){ c->hits++; }
     c->time++;
 
+    /*
+      set_index, we shift off the size of b for the block offset bits. 
+      We then need to do a bitwise and so that we can ignore all bits that
+      aren't the set index bits. 
+
+      we get the tag by just shifting off both the set index and the 
+      block offset bits.
+    */
     long set_index = (address >> c->b) & ((1 << c->s) - 1);
     long tag = address >> (c->s + c->b);
 
+    /*
+      once we've found the set index and tag, we can just select the correct 
+      set usign the set index. 
+    */
     set *current_set = &c->sets[set_index];
     int hit = 0, empty_line = -1, lru = 0;
     int replaced = current_set->lines[0].last;
@@ -162,7 +167,6 @@ void run(cache *c, const char *trace_file)
     }
     else
     {
-      c->misses++;
       if (empty_line != -1)
       {
         current_set->lines[empty_line].last = c->time;
@@ -171,15 +175,12 @@ void run(cache *c, const char *trace_file)
       }
       else
       {
-        current_set->lines[lru].last = c->time;
         current_set->lines[lru].tag = tag;
         c->evicts++;
+        current_set->lines[lru].last = c->time;
       }
+      c->misses++;
     }
-
-    if (operation == 'M')
-      c->hits++;
   }
-
   fclose(file);
 }
