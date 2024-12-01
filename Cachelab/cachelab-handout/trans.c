@@ -114,19 +114,18 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
     {
       for (int j = 0; j < M; j += nb) // col of blocks
       {
-        for (int k = i; k < i + nb && k < N; k++) // row in blcok 
+        for (int k = i; k < i + nb && k < N; k++) // row in blcok
         {
           for (int l = j; l < j + nb && l < M; l++) // col in block
           {
             /*
-              Just transpose everyting in order 
+              Just transpose everyting in order
               1890 misses
             */
-          //  B[diag][diag] = tmp;
-
+            //  B[diag][diag] = tmp;
 
             /*
-              Skips the diag until the end again. 
+              Skips the diag until the end again.
               1790 misses
             */
             if (k != l)
